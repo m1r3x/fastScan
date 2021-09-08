@@ -1,34 +1,50 @@
 #!/bin/bash
-if [ $# -eq 0 ]
-  then
-    echo "Usage: ./fastscan.sh <ip address or domain>"
-    exit 1
+
+trap ctrl_c INT
+
+function ctrl_c() {
+	sudo rm paused.conf 2>/dev/null
+        exit 1
+}
+
+
+if [ $# -eq 0 ]; then
+  printf "Usage: ./fastscan.sh <ip address or domain>"
+  exit 1
 fi
 
 target=$1
 
-#read -p "Enter domain name/ip to be scanned: " target
+if [[ $(ping -c 1 $target -w 5 | grep received | cut -d " " -f 4) != '1' ]]; then
+  printf "$target is down!"
+  exit 1
+fi
 
 if [[ $target =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
   :
 else
   target=$(getent ahostsv4 $target | head -1 | awk '{ print $1 }')
-  echo "Corresponding IP: $target"
+  printf "Corresponding IP: $target\n"
 fi
 
-echo "Performing masscan..."
+printf "Performing masscan...\n"
 
-sudo masscan -p- $target --rate 5000 -oG mass.log
+sudo masscan -p- $target --rate 5000 --wait 5 -oG mass.log
+printf "\n"
 
-cat mass.log | grep -i time | cut -d " " -f 5 | cut -d "/" -f 1 | sort -n > mass-$target.log
+cat mass.log | grep -i time | cut -d " " -f 5 | cut -d "/" -f 1 | sort -n > ports-$target.log
 sudo rm mass.log
 
-echo "Open Ports:"
-cat mass-$target.log
+printf "Open Ports:\n"
+cat ports-$target.log
+printf "\n"
 
-echo "Performing nmap scan..."
-nmap -p$(tr '\n' , <mass-$target.log) -sV -sC -vv -T4 -Pn -oN nmap-$target.log $target
+printf "Performing nmap scan...\n"
+sudo nmap -p$(tr '\n' , <ports-$target.log) -sU -sS -sC -sV -Pn -oN nmap-$target.log $target &> /dev/null
+printf "\n"
 
-echo "Results:"
-cat nmap-$target.log
+printf "Scan overview:\n"
+cat nmap-$target.log | grep -i open
+printf "\n"
 
+printf "Detailed scan result is saved in nmap-$target.log"
